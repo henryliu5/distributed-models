@@ -35,7 +35,7 @@ msg == [type: {"Prepared"}, sender: Participants] \cup [type: {"Abort", "Commit"
             ~ (/\ participant_state[p1] = "committed"
                /\ participant_state[p2] = "aborted")
         
-        \* <>(coordinator_state # "init")
+        CoordinatorDecision == <>(coordinator_state # "init")
         EndInCommitOrAbort == [][\A p \in Participants: 
             /\ participant_state[p] = "committed" => participant_state[p]' = "committed"
             /\ participant_state[p] = "aborted" => participant_state[p]' = "aborted"
@@ -45,30 +45,36 @@ msg == [type: {"Prepared"}, sender: Participants] \cup [type: {"Abort", "Commit"
     }
 
     fair process (Coordinator = "Coordinator") {
+        CoordinatorMain:
+        \* TODO find condition where you need this loop
+        \* probably will be if the messages all have commit ~> coordinator commit
+        while(coordinator_state = "init"){
             CoordinatorUpdate:
             \* Update prepared_participants based on messages
             with(particpate_msgs = {x \in all_msgs: x.type = "Prepared"}) {
-                await ({x.sender: x \in particpate_msgs} \ prepared_participants) # {};
+                \* await ({x.sender: x \in particpate_msgs} \ prepared_participants) # {};
                 prepared_participants := {x.sender: x \in particpate_msgs};
             };
 
             either {
-                CoordinatorCommit:
-                \* Send Commit if everyone is ready
-                await(prepared_participants = Participants);
-                all_msgs := all_msgs \cup {[type |-> "Commit"]};
-                coordinator_state := "committed";
-            } or {
-                CoordinatorAbort:
-                \* Coordinator can always abort (implementation detail: e.g. timeout)
-                all_msgs := all_msgs \cup {[type |-> "Abort"]};
-                coordinator_state := "aborted";
+                if(prepared_participants = Participants){
+                    CoordinatorCommit:
+                    \* Send Commit if everyone is ready
+                    all_msgs := all_msgs \cup {[type |-> "Commit"]};
+                    coordinator_state := "committed";
+                } else {
+                    CoordinatorAbort:
+                    \* Coordinator can always abort (implementation detail: e.g. timeout)
+                    all_msgs := all_msgs \cup {[type |-> "Abort"]};
+                    coordinator_state := "aborted";
+                }
             } 
             or {
                 CoordinatorFailure:
                 \* Explicit failure
                 coordinator_state := "failed";
             }
+        }
     };
 
     fair process (Participant \in Participants){
@@ -80,6 +86,7 @@ msg == [type: {"Prepared"}, sender: Participants] \cup [type: {"Abort", "Commit"
             all_msgs := all_msgs \cup {[type |-> "Prepared", sender |-> self]};
         } or {
             ParticipantFailure:
+            \* Can fail, same as abort but no message
             participant_state[self] := "failed";
         };
 
@@ -94,7 +101,7 @@ msg == [type: {"Prepared"}, sender: Participants] \cup [type: {"Abort", "Commit"
     }
 
 } *)
-\* BEGIN TRANSLATION (chksum(pcal) = "71fe0e91" /\ chksum(tla) = "6a8b6c8b")
+\* BEGIN TRANSLATION (chksum(pcal) = "58cd5f5" /\ chksum(tla) = "9ea5d0f5")
 VARIABLES prepared_participants, all_msgs, participant_state, 
           coordinator_state, pc
 
@@ -111,7 +118,7 @@ ParticipantsConsistent == \A p1, p2 \in Participants:
     ~ (/\ participant_state[p1] = "committed"
        /\ participant_state[p2] = "aborted")
 
-
+CoordinatorDecision == <>(coordinator_state # "init")
 EndInCommitOrAbort == [][\A p \in Participants:
     /\ participant_state[p] = "committed" => participant_state[p]' = "committed"
     /\ participant_state[p] = "aborted" => participant_state[p]' = "aborted"
@@ -130,40 +137,46 @@ Init == (* Global variables *)
         /\ all_msgs = {}
         /\ participant_state = [p \in Participants |-> "working"]
         /\ coordinator_state = "init"
-        /\ pc = [self \in ProcSet |-> CASE self = "Coordinator" -> "CoordinatorUpdate"
+        /\ pc = [self \in ProcSet |-> CASE self = "Coordinator" -> "CoordinatorMain"
                                         [] self \in Participants -> "ParticipantWorking"]
+
+CoordinatorMain == /\ pc["Coordinator"] = "CoordinatorMain"
+                   /\ IF coordinator_state = "init"
+                         THEN /\ pc' = [pc EXCEPT !["Coordinator"] = "CoordinatorUpdate"]
+                         ELSE /\ pc' = [pc EXCEPT !["Coordinator"] = "Done"]
+                   /\ UNCHANGED << prepared_participants, all_msgs, 
+                                   participant_state, coordinator_state >>
 
 CoordinatorUpdate == /\ pc["Coordinator"] = "CoordinatorUpdate"
                      /\ LET particpate_msgs == {x \in all_msgs: x.type = "Prepared"} IN
-                          /\ ({x.sender: x \in particpate_msgs} \ prepared_participants) # {}
-                          /\ prepared_participants' = {x.sender: x \in particpate_msgs}
-                     /\ \/ /\ pc' = [pc EXCEPT !["Coordinator"] = "CoordinatorCommit"]
-                        \/ /\ pc' = [pc EXCEPT !["Coordinator"] = "CoordinatorAbort"]
+                          prepared_participants' = {x.sender: x \in particpate_msgs}
+                     /\ \/ /\ IF prepared_participants' = Participants
+                                 THEN /\ pc' = [pc EXCEPT !["Coordinator"] = "CoordinatorCommit"]
+                                 ELSE /\ pc' = [pc EXCEPT !["Coordinator"] = "CoordinatorAbort"]
                         \/ /\ pc' = [pc EXCEPT !["Coordinator"] = "CoordinatorFailure"]
                      /\ UNCHANGED << all_msgs, participant_state, 
                                      coordinator_state >>
 
 CoordinatorCommit == /\ pc["Coordinator"] = "CoordinatorCommit"
-                     /\ (prepared_participants = Participants)
                      /\ all_msgs' = (all_msgs \cup {[type |-> "Commit"]})
                      /\ coordinator_state' = "committed"
-                     /\ pc' = [pc EXCEPT !["Coordinator"] = "Done"]
+                     /\ pc' = [pc EXCEPT !["Coordinator"] = "CoordinatorMain"]
                      /\ UNCHANGED << prepared_participants, participant_state >>
 
 CoordinatorAbort == /\ pc["Coordinator"] = "CoordinatorAbort"
                     /\ all_msgs' = (all_msgs \cup {[type |-> "Abort"]})
                     /\ coordinator_state' = "aborted"
-                    /\ pc' = [pc EXCEPT !["Coordinator"] = "Done"]
+                    /\ pc' = [pc EXCEPT !["Coordinator"] = "CoordinatorMain"]
                     /\ UNCHANGED << prepared_participants, participant_state >>
 
 CoordinatorFailure == /\ pc["Coordinator"] = "CoordinatorFailure"
                       /\ coordinator_state' = "failed"
-                      /\ pc' = [pc EXCEPT !["Coordinator"] = "Done"]
+                      /\ pc' = [pc EXCEPT !["Coordinator"] = "CoordinatorMain"]
                       /\ UNCHANGED << prepared_participants, all_msgs, 
                                       participant_state >>
 
-Coordinator == CoordinatorUpdate \/ CoordinatorCommit \/ CoordinatorAbort
-                  \/ CoordinatorFailure
+Coordinator == CoordinatorMain \/ CoordinatorUpdate \/ CoordinatorCommit
+                  \/ CoordinatorAbort \/ CoordinatorFailure
 
 ParticipantWorking(self) == /\ pc[self] = "ParticipantWorking"
                             /\ \/ /\ pc' = [pc EXCEPT ![self] = "ParticipantPrepare"]
