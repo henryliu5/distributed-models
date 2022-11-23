@@ -141,13 +141,14 @@ accept_msg == [sender: Nat, accepted_val: SUBSET Int]
                 Cardinality({accepted \in accept_msgs: accepted.accepted_val = y})
             \* Some fancy stuff to say "figure out where there is a quorum" -> that is majority_decision
             ){
-            if(Cardinality({accepted \in accept_msgs: accepted.accepted_val = majority_decision}) * 2 > NumAcceptors){
+            \* We can show that this state is indeed reached with this await clause, since the model checker output
+            \* will tell us how many times 3_RecvAccept actually occured.
+            await(Cardinality({accepted \in accept_msgs: accepted.accepted_val = majority_decision}) * 2 > NumAcceptors);
                 final_decision := final_decision \cup majority_decision;
-            }
         }
     }
 } *)
-\* BEGIN TRANSLATION (chksum(pcal) = "82fc2dba" /\ chksum(tla) = "ac03ef6f")
+\* BEGIN TRANSLATION (chksum(pcal) = "bf8de88f" /\ chksum(tla) = "daaeb55b")
 VARIABLES prepare_msgs, promise_msgs, propose_msgs, accept_msgs, 
           final_decision, pc
 
@@ -252,10 +253,8 @@ Acceptor(self) == AcceptorLoop(self) \/ 1B_Promise(self) \/ 2B_Accept(self)
                      LET majority_decision ==                 CHOOSE x \in accepted_vals: \A y \in accepted_vals:
                                               Cardinality({accepted \in accept_msgs: accepted.accepted_val = x}) >=
                                               Cardinality({accepted \in accept_msgs: accepted.accepted_val = y}) IN
-                       IF Cardinality({accepted \in accept_msgs: accepted.accepted_val = majority_decision}) * 2 > NumAcceptors
-                          THEN /\ final_decision' = (final_decision \cup majority_decision)
-                          ELSE /\ TRUE
-                               /\ UNCHANGED final_decision
+                       /\ (Cardinality({accepted \in accept_msgs: accepted.accepted_val = majority_decision}) * 2 > NumAcceptors)
+                       /\ final_decision' = (final_decision \cup majority_decision)
                 /\ pc' = [pc EXCEPT ![LearnerNum] = "Done"]
                 /\ UNCHANGED << prepare_msgs, promise_msgs, propose_msgs, 
                                 accept_msgs, ballot_count, id, max_id, 
@@ -286,7 +285,8 @@ AtMostOneAgreement == \A a \in Acceptors: accepted_value[a] \subseteq 1..NumProp
                                          /\ Cardinality(accepted_value[a]) <= 1
 
 \* If there was a decision reached by the distinguished learner, it was a majority
-DecisionIsMajority == final_decision # {} => 2 * Cardinality({a \in Acceptors: accepted_value[a] = final_decision}) > NumAcceptors
+DecisionIsMajority == final_decision # {} => 
+                    2 * Cardinality({a \in Acceptors: accepted_value[a] = final_decision}) > NumAcceptors
 
 ====
 
