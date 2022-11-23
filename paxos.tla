@@ -119,7 +119,7 @@ accept_msg == [sender: Nat, accepted_val: SUBSET Int]
                     \* Received a proposal that is the highest we've seen
                     await (recv_propose.id = max_id);
                         accepted_id := recv_propose.id;
-                        accepted_value := accepted_value \cup recv_propose.val;
+                        accepted_value := recv_propose.val;
                         SendAccept(self, accepted_value);
                 }
             }
@@ -129,19 +129,23 @@ accept_msg == [sender: Nat, accepted_val: SUBSET Int]
 
     \* Represents a "distinguished learner", a learner that propagates acceptances to the rest
     \* In reality this could be elected by something like a bully algorithm
+    \* This same procedure can be replicated in the Proposer as well
     fair process (DistinguishedLearer = LearnerNum){
         3_RecvAccept:
-        with(decisions \in SUBSET accept_msgs,
-            majority_decision = CHOOSE x \in decisions: \A y \in decisions: Count(x, decisions) >= Count(y, decisions)
+        await accept_msgs # {};
+        with(accepted_vals = {x.accepted_val: x \in accept_msgs},
+            majority_decision = CHOOSE x \in accepted_vals: \A y \in accepted_vals: 
+                Cardinality({accepted \in accept_msgs: accepted.accepted_val = x}) >=
+                Cardinality({accepted \in accept_msgs: accepted.accepted_val = y})
             \* Some fancy stuff to say "figure out where there is a quorum" -> that is majority_decision
             ){
-            if(Cardinality(decisions) * 2 > NumAcceptors){
-                final_decision := final_decision \cup majority_decision.accepted_val;
+            if(Cardinality({accepted \in accept_msgs: accepted.accepted_val = majority_decision}) * 2 > NumAcceptors){
+                final_decision := final_decision \cup majority_decision;
             }
         }
     }
 } *)
-\* BEGIN TRANSLATION (chksum(pcal) = "f0daed67" /\ chksum(tla) = "e5d36b4c")
+\* BEGIN TRANSLATION (chksum(pcal) = "43f3aed1" /\ chksum(tla) = "6446a9e4")
 VARIABLES prepare_msgs, promise_msgs, propose_msgs, accept_msgs, 
           final_decision, pc
 
@@ -231,7 +235,7 @@ AcceptorLoop(self) == /\ pc[self] = "AcceptorLoop"
                    /\ \E recv_propose \in propose_msgs:
                         /\ (recv_propose.id = max_id[self])
                         /\ accepted_id' = [accepted_id EXCEPT ![self] = recv_propose.id]
-                        /\ accepted_value' = [accepted_value EXCEPT ![self] = accepted_value[self] \cup recv_propose.val]
+                        /\ accepted_value' = [accepted_value EXCEPT ![self] = recv_propose.val]
                         /\ accept_msgs' = (accept_msgs \cup {[sender |-> self, accepted_val |-> accepted_value'[self]]})
                    /\ pc' = [pc EXCEPT ![self] = "AcceptorLoop"]
                    /\ UNCHANGED << prepare_msgs, promise_msgs, propose_msgs, 
@@ -240,10 +244,13 @@ AcceptorLoop(self) == /\ pc[self] = "AcceptorLoop"
 Acceptor(self) == AcceptorLoop(self) \/ 1B_Promise(self) \/ 2B_Accept(self)
 
 3_RecvAccept == /\ pc[LearnerNum] = "3_RecvAccept"
-                /\ \E decisions \in SUBSET accept_msgs:
-                     LET majority_decision == CHOOSE x \in decisions: \A y \in decisions: Count(x, decisions) >= Count(y, decisions) IN
-                       IF Cardinality(decisions) * 2 > NumAcceptors
-                          THEN /\ final_decision' = (final_decision \cup majority_decision.accepted_val)
+                /\ accept_msgs # {}
+                /\ LET accepted_vals == {x.accepted_val: x \in accept_msgs} IN
+                     LET majority_decision ==                 CHOOSE x \in accepted_vals: \A y \in accepted_vals:
+                                              Cardinality({accepted \in accept_msgs: accepted.accepted_val = x}) >=
+                                              Cardinality({accepted \in accept_msgs: accepted.accepted_val = y}) IN
+                       IF Cardinality({accepted \in accept_msgs: accepted.accepted_val = majority_decision}) * 2 > NumAcceptors
+                          THEN /\ final_decision' = (final_decision \cup majority_decision)
                           ELSE /\ TRUE
                                /\ UNCHANGED final_decision
                 /\ pc' = [pc EXCEPT ![LearnerNum] = "Done"]
@@ -271,8 +278,9 @@ AlwaysAgreement ==
     LET decisions == {accepted_value[a]: a \in Acceptors}
     IN <>(\E x \in decisions: 2 * Cardinality({a \in Acceptors: accepted_value[a] = x}) > NumAcceptors)
 
-\* Acceptors don't "change their mind"
-AtMostOneAgreement == \A a \in Acceptors: Cardinality(accepted_value[a]) <= 1
+\* Acceptors only take on valid values (obvious)
+AtMostOneAgreement == \A a \in Acceptors: accepted_value[a] \subseteq 1..NumProposers
+                                         /\ Cardinality(accepted_value[a]) <= 1
 
 \* If there was a decision reached by the distinguished learner, it was a majority
 DecisionIsMajority == final_decision # {} => 2 * Cardinality({a \in Acceptors: accepted_value[a] = final_decision}) > NumAcceptors
