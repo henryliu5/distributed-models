@@ -53,7 +53,8 @@ accept_msg == [sender: Nat, accepted_val: SUBSET Int]
     }
 
     macro SendAccept(sender, val){
-        accept_msgs := accept_msgs \cup {[sender |-> sender, accepted_val |-> val]};
+        \* Since an Acceptor can send out multiple acceptances, make sure to clean up the message board
+        accept_msgs := {msg \in accept_msgs: msg.sender # self} \cup {[sender |-> sender, accepted_val |-> val]};
     }
 
     fair process (Proposer \in Proposers) 
@@ -117,7 +118,8 @@ accept_msg == [sender: Nat, accepted_val: SUBSET Int]
                 2B_Accept:
                 with(recv_propose \in propose_msgs){
                     \* Received a proposal that is the highest we've seen
-                    await (recv_propose.id = max_id);
+                    await (recv_propose.id >= max_id);
+                        max_id := recv_propose.id;
                         accepted_id := recv_propose.id;
                         accepted_value := recv_propose.val;
                         SendAccept(self, accepted_value);
@@ -145,7 +147,7 @@ accept_msg == [sender: Nat, accepted_val: SUBSET Int]
         }
     }
 } *)
-\* BEGIN TRANSLATION (chksum(pcal) = "43f3aed1" /\ chksum(tla) = "6446a9e4")
+\* BEGIN TRANSLATION (chksum(pcal) = "82fc2dba" /\ chksum(tla) = "ac03ef6f")
 VARIABLES prepare_msgs, promise_msgs, propose_msgs, accept_msgs, 
           final_decision, pc
 
@@ -233,13 +235,14 @@ AcceptorLoop(self) == /\ pc[self] = "AcceptorLoop"
 
 2B_Accept(self) == /\ pc[self] = "2B_Accept"
                    /\ \E recv_propose \in propose_msgs:
-                        /\ (recv_propose.id = max_id[self])
+                        /\ (recv_propose.id >= max_id[self])
+                        /\ max_id' = [max_id EXCEPT ![self] = recv_propose.id]
                         /\ accepted_id' = [accepted_id EXCEPT ![self] = recv_propose.id]
                         /\ accepted_value' = [accepted_value EXCEPT ![self] = recv_propose.val]
-                        /\ accept_msgs' = (accept_msgs \cup {[sender |-> self, accepted_val |-> accepted_value'[self]]})
+                        /\ accept_msgs' = ({msg \in accept_msgs: msg.sender # self} \cup {[sender |-> self, accepted_val |-> accepted_value'[self]]})
                    /\ pc' = [pc EXCEPT ![self] = "AcceptorLoop"]
                    /\ UNCHANGED << prepare_msgs, promise_msgs, propose_msgs, 
-                                   final_decision, ballot_count, id, max_id >>
+                                   final_decision, ballot_count, id >>
 
 Acceptor(self) == AcceptorLoop(self) \/ 1B_Promise(self) \/ 2B_Accept(self)
 
