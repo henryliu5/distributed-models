@@ -1,7 +1,7 @@
 ---- MODULE paxos ----
 EXTENDS Integers, Sequences, TLC, FiniteSets
 
-CONSTANT NULL, NumProposers, NumAcceptors
+CONSTANT NULL, NumProposers, NumAcceptors, MaxRetry
 Proposers == 1..NumProposers
 Acceptors == NumProposers + 1..NumProposers + NumAcceptors
 LearnerNum == NumProposers + NumAcceptors + 1
@@ -9,7 +9,7 @@ LearnerNum == NumProposers + NumAcceptors + 1
 prepare_msg == [id: Nat]
 promise_msg == [id: Nat, acceptor_id: Nat, accepted_id: Int, accepted_val: SUBSET Int]
 propose_msg == [id: Nat, val: SUBSET Int]
-accept_msg == [sender: Nat, accepted_val: SUBSET Int]
+accept_msg == [sender: Nat, accepted_id: Int, accepted_val: SUBSET Int]
 
 (*--algorithm Paxos {
     variables
@@ -52,9 +52,9 @@ accept_msg == [sender: Nat, accepted_val: SUBSET Int]
         propose_msgs := propose_msgs \cup {[id |-> send_id, val |-> send_val]};
     }
 
-    macro SendAccept(sender, val){
+    macro SendAccept(sender, id, val){
         \* Since an Acceptor can send out multiple acceptances, make sure to clean up the message board
-        accept_msgs := {msg \in accept_msgs: msg.sender # self} \cup {[sender |-> sender, accepted_val |-> val]};
+        accept_msgs := {msg \in accept_msgs: msg.sender # self} \cup {[sender |-> sender, accepted_id |-> id, accepted_val |-> val]};
     }
 
     fair process (Proposer \in Proposers) 
@@ -65,8 +65,6 @@ accept_msg == [sender: Nat, accepted_val: SUBSET Int]
         1A_Prepare:
         \* Create a unique ID by basically doing a bit shift (base NumProposers) + setting low order bits
         id := ballot_count * NumProposers + self;
-        \* Update ballot count (so id is different next time), send Prepare
-        ballot_count := ballot_count + 1;
         SendPrepare(id);
 
         2A_Propose:
@@ -78,19 +76,21 @@ accept_msg == [sender: Nat, accepted_val: SUBSET Int]
                     if(max.accepted_id > 0){
                         SendPropose(id, max.accepted_val);
                     } else {
-                        \* Use "self" as the value to send
-                        SendPropose(id, {self});
+                        \* Use id % 2 as the value to send
+                        SendPropose(id, {id % 2});
                     };
                 }
             }
             \* NOTE This retry isn't actually necessary since it's the same as a 
             \* new Proposer being created and starting a new proposal "now". Setting
             \* the retry leads to the same behavior as increasing the nubmer of Proposers
-            \*  else {
+             else {
+                \* Update ballot count (so id is different next time), send Prepare
+                ballot_count := ballot_count + 1;
                 \*  NOTE If we have an unbounded retry here, we can't even say anything about invariants
                 \*  since we are causing an infinite loop (with infinite states), as ballot_count always changes
-                \* if(ballot_count < 2) goto 1A_Prepare;
-            \* }
+                if(ballot_count <= MaxRetry) goto 1A_Prepare;
+            }
         }
         
     }
@@ -122,7 +122,8 @@ accept_msg == [sender: Nat, accepted_val: SUBSET Int]
                         max_id := recv_propose.id;
                         accepted_id := recv_propose.id;
                         accepted_value := recv_propose.val;
-                        SendAccept(self, accepted_value);
+                        
+                        SendAccept(self, accepted_id, accepted_value);
                 }
             }
         }
@@ -133,22 +134,48 @@ accept_msg == [sender: Nat, accepted_val: SUBSET Int]
     \* In reality this could be elected by something like a bully algorithm
     \* This same procedure can be replicated in the Proposer as well
     fair process (DistinguishedLearer = LearnerNum){
-        3_RecvAccept:
-        await accept_msgs # {};
-        with(accepted_vals = {x.accepted_val: x \in accept_msgs},
-            majority_decision = CHOOSE x \in accepted_vals: \A y \in accepted_vals: 
-                Cardinality({accepted \in accept_msgs: accepted.accepted_val = x}) >=
-                Cardinality({accepted \in accept_msgs: accepted.accepted_val = y})
-            \* Some fancy stuff to say "figure out where there is a quorum" -> that is majority_decision
-            ){
-            \* We can show that this state is indeed reached with this await clause, since the model checker output
-            \* will tell us how many times 3_RecvAccept actually occured.
-            await(Cardinality({accepted \in accept_msgs: accepted.accepted_val = majority_decision}) * 2 > NumAcceptors);
+        LearnerLoop:
+        while(TRUE){
+            3_RecvAccept:
+            await accept_msgs # {};
+            with(accepted_vals = {x.accepted_val: x \in accept_msgs},
+                majority_decision = CHOOSE x \in accepted_vals: \A y \in accepted_vals: 
+                    Cardinality({accepted \in accept_msgs: accepted.accepted_val = x}) >=
+                    Cardinality({accepted \in accept_msgs: accepted.accepted_val = y})
+                \* Some fancy stuff to say "figure out where there is a quorum" -> that is majority_decision
+                ){
+                \* We can show that this state is indeed reached with this await clause, since the model checker output
+                \* will tell us how many times 3_RecvAccept actually occured.
+                await(Cardinality({accepted \in accept_msgs: accepted.accepted_val = majority_decision}) * 2 > NumAcceptors);
                 final_decision := final_decision \cup majority_decision;
+            }
         }
+
+        \* LearnerLoop:
+        \* while(TRUE){
+        \*     3_RecvAccept:
+        \*     \* Consensus on on ID, so figure out if a ballot ID comprises a quorum of acceptors
+        \*     with(accepted_ids = {x.accepted_id: x \in accept_msgs},
+        \*         majority_decision_id = CHOOSE x \in accepted_ids: \A y \in accepted_ids: 
+        \*             Cardinality({accepted \in accept_msgs: accepted.accepted_id = x}) >=
+        \*             Cardinality({accepted \in accept_msgs: accepted.accepted_id = y})
+        \*         \* Some fancy stuff to say "figure out where there is a quorum" -> that is majority_decision
+        \*         ){
+
+        \*         \* We can show that this state is indeed reached with this await clause, since the model checker output
+        \*         \* will tell us how many times 3_RecvAccept actually occured.
+        \*         await(Cardinality({accepted \in accept_msgs: accepted.accepted_id = majority_decision_id}) * 2 > NumAcceptors);
+
+        \*         with(decision_msg = CHOOSE x \in accept_msgs: x.accepted_id = majority_decision_id){
+        \*             final_decision := final_decision \cup decision_msg.accepted_val;
+        \*         }
+                
+        \*         \* print(final_decision);
+        \*     }
+        \* }
     }
 } *)
-\* BEGIN TRANSLATION (chksum(pcal) = "bf8de88f" /\ chksum(tla) = "daaeb55b")
+\* BEGIN TRANSLATION (chksum(pcal) = "79746e1" /\ chksum(tla) = "85cb76a8")
 VARIABLES prepare_msgs, promise_msgs, propose_msgs, accept_msgs, 
           final_decision, pc
 
@@ -189,16 +216,15 @@ Init == (* Global variables *)
         /\ accepted_value = [self \in Acceptors |-> {}]
         /\ pc = [self \in ProcSet |-> CASE self \in Proposers -> "1A_Prepare"
                                         [] self \in Acceptors -> "AcceptorLoop"
-                                        [] self = LearnerNum -> "3_RecvAccept"]
+                                        [] self = LearnerNum -> "LearnerLoop"]
 
 1A_Prepare(self) == /\ pc[self] = "1A_Prepare"
                     /\ id' = [id EXCEPT ![self] = ballot_count[self] * NumProposers + self]
-                    /\ ballot_count' = [ballot_count EXCEPT ![self] = ballot_count[self] + 1]
                     /\ prepare_msgs' = (prepare_msgs \cup {[id |-> id'[self]]})
                     /\ pc' = [pc EXCEPT ![self] = "2A_Propose"]
                     /\ UNCHANGED << promise_msgs, propose_msgs, accept_msgs, 
-                                    final_decision, max_id, accepted_id, 
-                                    accepted_value >>
+                                    final_decision, ballot_count, max_id, 
+                                    accepted_id, accepted_value >>
 
 2A_Propose(self) == /\ pc[self] = "2A_Propose"
                     /\ LET responses == {msg \in promise_msgs: msg.id = id[self]} IN
@@ -206,13 +232,17 @@ Init == (* Global variables *)
                             THEN /\ LET max == QuorumMax(responses) IN
                                       IF max.accepted_id > 0
                                          THEN /\ propose_msgs' = (propose_msgs \cup {[id |-> id[self], val |-> (max.accepted_val)]})
-                                         ELSE /\ propose_msgs' = (propose_msgs \cup {[id |-> id[self], val |-> ({self})]})
-                            ELSE /\ TRUE
+                                         ELSE /\ propose_msgs' = (propose_msgs \cup {[id |-> id[self], val |-> ({id[self] % 2})]})
+                                 /\ pc' = [pc EXCEPT ![self] = "Done"]
+                                 /\ UNCHANGED ballot_count
+                            ELSE /\ ballot_count' = [ballot_count EXCEPT ![self] = ballot_count[self] + 1]
+                                 /\ IF ballot_count'[self] <= MaxRetry
+                                       THEN /\ pc' = [pc EXCEPT ![self] = "1A_Prepare"]
+                                       ELSE /\ pc' = [pc EXCEPT ![self] = "Done"]
                                  /\ UNCHANGED propose_msgs
-                    /\ pc' = [pc EXCEPT ![self] = "Done"]
                     /\ UNCHANGED << prepare_msgs, promise_msgs, accept_msgs, 
-                                    final_decision, ballot_count, id, max_id, 
-                                    accepted_id, accepted_value >>
+                                    final_decision, id, max_id, accepted_id, 
+                                    accepted_value >>
 
 Proposer(self) == 1A_Prepare(self) \/ 2A_Propose(self)
 
@@ -240,12 +270,18 @@ AcceptorLoop(self) == /\ pc[self] = "AcceptorLoop"
                         /\ max_id' = [max_id EXCEPT ![self] = recv_propose.id]
                         /\ accepted_id' = [accepted_id EXCEPT ![self] = recv_propose.id]
                         /\ accepted_value' = [accepted_value EXCEPT ![self] = recv_propose.val]
-                        /\ accept_msgs' = ({msg \in accept_msgs: msg.sender # self} \cup {[sender |-> self, accepted_val |-> accepted_value'[self]]})
+                        /\ accept_msgs' = ({msg \in accept_msgs: msg.sender # self} \cup {[sender |-> self, accepted_id |-> accepted_id'[self], accepted_val |-> accepted_value'[self]]})
                    /\ pc' = [pc EXCEPT ![self] = "AcceptorLoop"]
                    /\ UNCHANGED << prepare_msgs, promise_msgs, propose_msgs, 
                                    final_decision, ballot_count, id >>
 
 Acceptor(self) == AcceptorLoop(self) \/ 1B_Promise(self) \/ 2B_Accept(self)
+
+LearnerLoop == /\ pc[LearnerNum] = "LearnerLoop"
+               /\ pc' = [pc EXCEPT ![LearnerNum] = "3_RecvAccept"]
+               /\ UNCHANGED << prepare_msgs, promise_msgs, propose_msgs, 
+                               accept_msgs, final_decision, ballot_count, id, 
+                               max_id, accepted_id, accepted_value >>
 
 3_RecvAccept == /\ pc[LearnerNum] = "3_RecvAccept"
                 /\ accept_msgs # {}
@@ -255,12 +291,12 @@ Acceptor(self) == AcceptorLoop(self) \/ 1B_Promise(self) \/ 2B_Accept(self)
                                               Cardinality({accepted \in accept_msgs: accepted.accepted_val = y}) IN
                        /\ (Cardinality({accepted \in accept_msgs: accepted.accepted_val = majority_decision}) * 2 > NumAcceptors)
                        /\ final_decision' = (final_decision \cup majority_decision)
-                /\ pc' = [pc EXCEPT ![LearnerNum] = "Done"]
+                /\ pc' = [pc EXCEPT ![LearnerNum] = "LearnerLoop"]
                 /\ UNCHANGED << prepare_msgs, promise_msgs, propose_msgs, 
                                 accept_msgs, ballot_count, id, max_id, 
                                 accepted_id, accepted_value >>
 
-DistinguishedLearer == 3_RecvAccept
+DistinguishedLearer == LearnerLoop \/ 3_RecvAccept
 
 Next == DistinguishedLearer
            \/ (\E self \in Proposers: Proposer(self))
@@ -276,12 +312,14 @@ Spec == /\ Init /\ [][Next]_vars
 \* !! Can't say this! This says there always will exist a majority decision
 \* !! It's very difficult to reason about only having N failures out of 2N + 1 nodes
 \* !! Even if we went through that annoying process, there can still be livelock
-AlwaysAgreement ==
-    LET decisions == {accepted_value[a]: a \in Acceptors}
-    IN <>(\E x \in decisions: 2 * Cardinality({a \in Acceptors: accepted_value[a] = x}) > NumAcceptors)
+AlwaysAgreement == <>[](Cardinality(final_decision > 0))
+
+\* Once a value has been decided (consensus), it will not change
+Integrity == Cardinality(final_decision) <= 1
 
 \* Acceptors only take on valid values (obvious)
-AtMostOneAgreement == \A a \in Acceptors: accepted_value[a] \subseteq 1..NumProposers
+AtMostOneAgreement == \A a \in Acceptors: 
+                                         /\ accepted_value[a] \subseteq 0..1
                                          /\ Cardinality(accepted_value[a]) <= 1
 
 \* If there was a decision reached by the distinguished learner, it was a majority
