@@ -1,0 +1,13 @@
+<Project>
+<ProjectName>Paxos</ProjectName>
+<InputFiles>
+	<PFile>./PSrc/</PFile>
+	<PFile>./PSpec/</PFile>
+	<PFile>./PTst/</PFile>
+</InputFiles>
+<OutputDir>./PGenerated/</OutputDir>
+<!-- Add the dependencies for the Timer machine -->
+<IncludeProject>../Common/Timer/Timer.pproj</IncludeProject>
+<!-- Add the dependencies for the FailureInjector machine -->
+<IncludeProject>../Common/FailureInjector/FailureInjector.pproj</IncludeProject>
+</Project>
