@@ -39,6 +39,7 @@ machine Learner {
                         // Woohoo got majority
                         decided = true;
                         decidedVal = val;
+                        announce eValueDecided, decidedVal;
                     }
                 }
                 i = i + 1;

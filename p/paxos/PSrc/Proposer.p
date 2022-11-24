@@ -17,25 +17,28 @@ event eAccept: tAccept;
 
 machine Proposer
 {
+    // Constants
     var acceptors: set[Acceptor];
+    var numProposers: int;
+    var maxRetry: int;
+    var curBallotId: int;
+    var reliableMessages: bool;
 
     var round: int;
     var proposerId: int;
-    var curBallotId: int;
-    var numProposers: int;
-    var maxRetry: int;
 
     start state Init {
         // Set up initial state, who the acceptors are, which proposer are we
-        entry (args : (acceptors: set[Acceptor], proposerId: int, numProposers: int)) {
+        entry (args : (acceptors: set[Acceptor], proposerId: int, numProposers: int, reliableMessages: bool)) {
             proposerId = args.proposerId;
             acceptors = args.acceptors;
             numProposers = args.numProposers;
+            reliableMessages = args.reliableMessages;
             round = 0;
             curBallotId = proposerId;
 
             // Manually set the maximum retry limit
-            maxRetry = -1;
+            maxRetry = 5;
 
             goto PreparePhase;
         }
@@ -48,10 +51,16 @@ machine Proposer
             // Next time increase the ballot id
             round = round + 1;
             if(round == maxRetry){
+                print format("Ran out of retries, halting");
                 raise halt;
             }
 
-            UnReliableBroadCast(acceptors, ePrepare, (proposer = this, ballotId = curBallotId));
+            if(reliableMessages){
+                ReliableBroadCast(acceptors, ePrepare, (proposer = this, ballotId = curBallotId));
+            } else {
+                UnReliableBroadCast(acceptors, ePrepare, (proposer = this, ballotId = curBallotId));
+            }
+
             goto WaitForPromises;
         }
     }
@@ -84,7 +93,11 @@ machine Proposer
 
                 if(receivedPromises * 2 > sizeof(acceptors)){
                     // Reached a majority
-                    UnReliableBroadCast(acceptors, ePropose, (proposer = this, ballotId = curBallotId, value = sendValue));
+                    if(reliableMessages){
+                        ReliableBroadCast(acceptors, ePropose, (proposer = this, ballotId = curBallotId, value = sendValue));
+                    } else {
+                        UnReliableBroadCast(acceptors, ePropose, (proposer = this, ballotId = curBallotId, value = sendValue));
+                    }
                     goto PreparePhase;
                 }
             }

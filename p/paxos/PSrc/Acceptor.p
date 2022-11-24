@@ -8,14 +8,16 @@ machine Acceptor {
     var acceptedValue: int;
     var myId: int;
     var learner: Learner;
+    var reliableMessages: bool;
 
     start state Init {
-        entry (args: (myId: int, learner: Learner)){
+        entry (args: (myId: int, learner: Learner, reliableMessages: bool)){
             maxId = -1;
             acceptedId = -1;
             acceptedValue = -1;
             learner = args.learner;
             myId = args.myId;
+            reliableMessages = args.reliableMessages;
 
             goto WaitForRequests;
         }
@@ -29,20 +31,36 @@ machine Acceptor {
                 // Update the largest ID we've seen
                 maxId = prepareMsg.ballotId;
 
-                UnReliableSend(prepareMsg.proposer, ePromise, (ballotId = prepareMsg.ballotId, \
-                                                     acceptedBallotId = acceptedId, \
-                                                     acceptedVal = acceptedValue));
+                if(reliableMessages){
+                    send prepareMsg.proposer, ePromise, (ballotId = prepareMsg.ballotId, \
+                                                         acceptedBallotId = acceptedId, \
+                                                         acceptedVal = acceptedValue);
+                } else {
+                    UnReliableSend(prepareMsg.proposer, ePromise, (ballotId = prepareMsg.ballotId, \
+                                                         acceptedBallotId = acceptedId, \
+                                                         acceptedVal = acceptedValue));
+                }
             }
             // Sending back a failure isn't really necessary, its a performance optimization
         }
         // Propose requests
         on ePropose do (proposeMsg: tPropose){
-            if(proposeMsg.ballotId >= maxId){
+            if(proposeMsg.ballotId == maxId){
                 maxId = proposeMsg.ballotId;
                 acceptedId = proposeMsg.ballotId;
                 acceptedValue = proposeMsg.value;
-                UnReliableSend(learner, eAccept, (acceptorId = myId, acceptedVal = acceptedValue));
+                print format("Acceptor_id {0} accepted proposal ballot_id {1}, value {2}", myId, acceptedId, acceptedValue);
+                // Tell learner about our decision
+                if(reliableMessages){
+                    send learner, eAccept, (acceptorId = myId, acceptedVal = acceptedValue);
+                } else {
+                    UnReliableSend(learner, eAccept, (acceptorId = myId, acceptedVal = acceptedValue));
+                }
             }
+        }
+
+        on eShutDown do {
+            raise halt;
         }
     }
  }

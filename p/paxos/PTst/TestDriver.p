@@ -1,9 +1,9 @@
 // type that represents the configuration of the system under test
 type sysConfig = (
-  numClients: int,
   numProposers: int,
   numAcceptors: int,
-  failAcceptors: int
+  failAcceptors: int,
+  reliableMessages: bool
 );
 
 // function that creates the two phase commit system along with the machines in its
@@ -20,14 +20,14 @@ fun SetUpPaxosSystem(config: sysConfig)
     // create acceptors
     i = 0;
     while (i < config.numAcceptors) {
-        acceptors += (new Acceptor((myId = i, learner = learner)));
+        acceptors += (new Acceptor((myId = i, learner = learner, reliableMessages = config.reliableMessages)));
         i = i + 1;
     }
 
     // create proposers
     i = 0;
     while (i < config.numProposers) {
-        proposers += (new Proposer((acceptors = acceptors, proposerId = i, numProposers = config.numProposers)));
+        proposers += (new Proposer((acceptors = acceptors, proposerId = i, numProposers = config.numProposers, reliableMessages = config.reliableMessages)));
         i = i + 1;
     }
 
@@ -45,11 +45,10 @@ fun SetUpPaxosSystem(config: sysConfig)
 //    i = i + 1;
 //  }
 //
-//  // create the failure injector if we want to inject failures
-//  if(config.failParticipants > 0)
-//  {
-//    CreateFailureInjector((nodes = participants, nFailures = config.failParticipants));
-//  }
+  // create the failure injector if we want to inject failures
+    if(config.failAcceptors > 0) {
+        CreateFailureInjector((nodes = acceptors, nFailures = config.failAcceptors));
+    }
 }
 //
 //fun InitializeTwoPhaseCommitSpecifications(numParticipants: int) {
@@ -111,15 +110,30 @@ fun SetUpPaxosSystem(config: sysConfig)
 //  }
 //}
 
+machine NoFailures {
+    start state Init {
+        entry {
+            var config: sysConfig;
+            config = (
+                numProposers = 2,
+                numAcceptors = 3,
+                failAcceptors = 0, // failures must be < numAcceptors (assertion in FailureInjector)
+                reliableMessages = true
+            );
+            SetUpPaxosSystem(config);
+        }
+    }
+}
+
 machine BasicTest {
     start state Init {
         entry {
             var config: sysConfig;
             config = (
-                numClients = 1,
                 numProposers = 3,
                 numAcceptors = 3,
-                failAcceptors = 0
+                failAcceptors = 2, // failures must be < numAcceptors (assertion in FailureInjector)
+                reliableMessages = false
             );
             SetUpPaxosSystem(config);
         }

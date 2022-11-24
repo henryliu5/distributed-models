@@ -11,4 +11,6 @@
 //test tcMultipleClientsWithFailure [main = MultipleClientsWithFailure]:
 //  assert Progress in (union Paxos, TwoPCClient, FailureInjector, { MultipleClientsWithFailure });
 
-test basicTest [main = BasicTest]: assert Progress, Integrity in (union Paxos, { BasicTest });
+
+test basicTest [main = BasicTest]: assert Integrity in (union Paxos, FailureInjector, { BasicTest });
+test idealWorld [main = NoFailures]: assert Integrity, AlwaysReachesConsensus in (union Paxos, FailureInjector, { NoFailures });

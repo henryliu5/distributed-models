@@ -16,33 +16,27 @@ spec Integrity observes eValueDecided {
 
     state SeenValue {
         on eValueDecided do (val: int) {
-            assert false, format("Previously decided on value {0}, but came to new consensus {1}", observedValue, val);
+            assert observedValue == val, format("Previously decided on value {0}, but came to new consensus {1}", observedValue, val);
         }
     }
 }
 
-spec Progress observes ePrepare, ePromise, ePropose, eAccept {
-//  var pendingTransactions: int;
+// This spec fails assertion if a value is ever decided
+spec FailIfConsensus observes eValueDecided {
     start state Init {
-//    on eWriteTransReq goto WaitForResponses with { pendingTransactions = pendingTransactions + 1; }
-        ignore ePrepare, ePromise, ePropose, eAccept;
+        on eValueDecided do (val: int) {
+            assert false, format("Consensus was reached during a behavior - is this expected?");
+        }
+    }
+}
+
+// This spec makes indecision a hot state
+spec AlwaysReachesConsensus observes eValueDecided {
+    start hot state Init {
+        on eValueDecided goto ValueDecided;
     }
 
-//
-//  hot state WaitForResponses
-//  {
-//    on eWriteTransResp do {
-//      pendingTransactions = pendingTransactions - 1;
-//      if(pendingTransactions == 0)
-//      {
-//        goto AllTransactionsFinished;
-//      }
-//    }
-//
-//    on eWriteTransReq do { pendingTransactions = pendingTransactions + 1; }
-//  }
-//
-//  cold state AllTransactionsFinished {
-//    on eWriteTransReq goto WaitForResponses with { pendingTransactions = pendingTransactions + 1; }
-//  }
+    cold state ValueDecided {
+        ignore eValueDecided;
+    }
 }
