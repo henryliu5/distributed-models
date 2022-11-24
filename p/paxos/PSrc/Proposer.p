@@ -4,7 +4,7 @@ event ePrepare: tPrepare;
 
 // Sent by Acceptor to Proposer
 //type tPromise = (acceptorId: int, ballotId: int, acceptedBallotId: int, acceptedVal: int);
-type tPromise = (ballotId: int, acceptedBallotId: int, acceptedVal: int);
+type tPromise = (acceptor: Acceptor, ballotId: int, acceptedBallotId: int, acceptedVal: int);
 event ePromise: tPromise;
 
 // Sent by Proposer to Acceptor
@@ -12,7 +12,7 @@ type tPropose = (proposerId: Proposer, ballotId: int, value: int);
 event ePropose: tPropose;
 
 // Sent by Acceptor to Learner/Proposers
-type tAccept = (acceptorId: int, acceptedVal: int);
+type tAccept = (acceptorId: int, acceptedId: int, acceptedVal: int);
 event eAccept: tAccept;
 
 machine Proposer

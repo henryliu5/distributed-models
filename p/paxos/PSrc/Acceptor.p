@@ -32,11 +32,13 @@ machine Acceptor {
                 maxId = prepareMsg.ballotId;
 
                 if(reliableMessages){
-                    send prepareMsg.proposer, ePromise, (ballotId = prepareMsg.ballotId, \
+                    send prepareMsg.proposer, ePromise, (acceptor = this, \
+                                                         ballotId = prepareMsg.ballotId, \
                                                          acceptedBallotId = acceptedId, \
                                                          acceptedVal = acceptedValue);
                 } else {
-                    UnReliableSend(prepareMsg.proposer, ePromise, (ballotId = prepareMsg.ballotId, \
+                    UnReliableSend(prepareMsg.proposer, ePromise, (acceptor = this, \
+                                                         ballotId = prepareMsg.ballotId, \
                                                          acceptedBallotId = acceptedId, \
                                                          acceptedVal = acceptedValue));
                 }
@@ -45,16 +47,16 @@ machine Acceptor {
         }
         // Propose requests
         on ePropose do (proposeMsg: tPropose){
-            if(proposeMsg.ballotId == maxId){
+            if(proposeMsg.ballotId >= maxId){
                 maxId = proposeMsg.ballotId;
                 acceptedId = proposeMsg.ballotId;
                 acceptedValue = proposeMsg.value;
                 print format("Acceptor_id {0} accepted proposal ballot_id {1}, value {2}", myId, acceptedId, acceptedValue);
                 // Tell learner about our decision
                 if(reliableMessages){
-                    send learner, eAccept, (acceptorId = myId, acceptedVal = acceptedValue);
+                    send learner, eAccept, (acceptorId = myId, acceptedId = acceptedId, acceptedVal = acceptedValue);
                 } else {
-                    UnReliableSend(learner, eAccept, (acceptorId = myId, acceptedVal = acceptedValue));
+                    UnReliableSend(learner, eAccept, (acceptorId = myId, acceptedId = acceptedId, acceptedVal = acceptedValue));
                 }
             }
         }
