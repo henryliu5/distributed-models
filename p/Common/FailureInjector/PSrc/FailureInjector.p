@@ -21,17 +21,28 @@ machine FailureInjector {
   state FailOneNode {
     entry {
       var fail: machine;
-
+      var failCount: int;
+      var num: int;
       if(nFailures == 0)
         raise halt; // done with all failures
       else
       {
         if($)
         {
-          fail = choose(nodes);
-          send fail, eShutDown, fail;
-          nodes -= (fail);
-          nFailures = nFailures - 1;
+          num = choose(nFailures);
+          // Modify failure injector to be able to halt multiple nodes at a time
+          while(failCount < num){
+              fail = choose(nodes);
+              send fail, eShutDown, fail;
+              nodes -= (fail);
+              nFailures = nFailures - 1;
+              failCount = failCount + 1;
+          }
+//          fail = choose(nodes);
+//          send fail, eShutDown, fail;
+//          nodes -= (fail);
+//          nFailures = nFailures - 1;
+////          goto FailOneNode;
         }
         else {
           send this, eDelayNodeFailure;

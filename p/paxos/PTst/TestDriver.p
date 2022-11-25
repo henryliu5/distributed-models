@@ -3,7 +3,8 @@ type sysConfig = (
   numProposers: int,
   numAcceptors: int,
   failAcceptors: int,
-  reliableMessages: bool
+  reliableMessages: bool,
+  maxRetry: int // How many times a Proposer can restart
 );
 
 // function that creates the two phase commit system along with the machines in its
@@ -27,89 +28,21 @@ fun SetUpPaxosSystem(config: sysConfig)
     // create proposers
     i = 0;
     while (i < config.numProposers) {
-        proposers += (new Proposer((acceptors = acceptors, proposerId = i, numProposers = config.numProposers, reliableMessages = config.reliableMessages)));
+        proposers += (new Proposer((acceptors = acceptors,
+                                    proposerId = i,
+                                    numProposers = config.numProposers,
+                                    reliableMessages = config.reliableMessages,
+                                    maxRetry = config.maxRetry)));
         i = i + 1;
     }
 
-//  // initialize the monitors (specifications)
-//  InitializeTwoPhaseCommitSpecifications(config.numParticipants);
-//
-//  // create the coordinator
-//  coordinator = new Coordinator(participants);
-//
-//  // create the clients
-//  i = 0;
-//  while(i < config.numClients)
-//  {
-//    new Client((coordinator = coordinator, n = config.numTransPerClient, id = i + 1));
-//    i = i + 1;
-//  }
-//
   // create the failure injector if we want to inject failures
     if(config.failAcceptors > 0) {
         CreateFailureInjector((nodes = acceptors, nFailures = config.failAcceptors));
     }
 }
-//
-//fun InitializeTwoPhaseCommitSpecifications(numParticipants: int) {
-//  // inform the monitor the number of participants in the system
-//  announce eMonitor_AtomicityInitialize, numParticipants;
-//}
-//
-///*
-//This machine creates the 3 participants, 1 coordinator, and 1 clients
-//*/
-//machine SingleClientNoFailure {
-//  start state Init {
-//    entry {
-//      var config: t2PCConfig;
-//
-//      config = (numClients = 1,
-//                      numParticipants = 3,
-//                      numTransPerClient = 2,
-//                      failParticipants = 0);
-//
-//            SetUpTwoPhaseCommitSystem(config);
-//    }
-//  }
-//}
-//
-///*
-//This machine creates the 3 participants, 1 coordinator, and 1 clients
-//*/
-//machine MultipleClientsNoFailure {
-//  start state Init {
-//    entry {
-//      var config: t2PCConfig;
-//      config =
-//        (numClients = 2,
-//        numParticipants = 3,
-//        numTransPerClient = 2,
-//        failParticipants = 0);
-//
-//        SetUpTwoPhaseCommitSystem(config);
-//    }
-//  }
-//}
-//
-///*
-//This machine creates the 3 participants, 1 coordinator, 1 Failure injector, and 2 clients
-//*/
-//machine MultipleClientsWithFailure {
-//  start state Init {
-//    entry {
-//      var config: t2PCConfig;
-//      config =
-//        (numClients = 2,
-//        numParticipants = 3,
-//        numTransPerClient = 2,
-//        failParticipants = 1);
-//
-//      SetUpTwoPhaseCommitSystem(config);
-//    }
-//  }
-//}
 
+// Ideal world where there is no failures and no message loss
 machine NoFailures {
     start state Init {
         entry {
@@ -118,12 +51,65 @@ machine NoFailures {
                 numProposers = 2,
                 numAcceptors = 3,
                 failAcceptors = 0, // failures must be < numAcceptors (assertion in FailureInjector)
-                reliableMessages = true
+                reliableMessages = true,
+                maxRetry = 3
             );
             SetUpPaxosSystem(config);
         }
     }
 }
+
+// Ideal world where there is no failures and no message loss BUT there is unlimited retries
+machine NoFailuresUnlimitedRetry {
+    start state Init {
+        entry {
+            var config: sysConfig;
+            config = (
+                numProposers = 2,
+                numAcceptors = 3,
+                failAcceptors = 0, // failures must be < numAcceptors (assertion in FailureInjector)
+                reliableMessages = true,
+                maxRetry = -1
+            );
+            SetUpPaxosSystem(config);
+        }
+    }
+}
+
+// World where there is no message loss and less than half of machines can go down
+ machine NoMessageLoss {
+     start state Init {
+         entry {
+             var config: sysConfig;
+             config = (
+                 numProposers = 2,
+                 numAcceptors = 5,
+                 failAcceptors = 2, // failures must be < numAcceptors (assertion in FailureInjector)
+                 reliableMessages = true,
+                 maxRetry = 1
+             );
+             SetUpPaxosSystem(config);
+         }
+     }
+ }
+
+ // World where there is no message loss and more than than half of machines can go down
+machine TooMuchFailure {
+    start state Init {
+        entry {
+            var config: sysConfig;
+            config = (
+                numProposers = 3,
+                numAcceptors = 5,
+                failAcceptors = 4, // failures must be < numAcceptors (assertion in FailureInjector)
+                reliableMessages = true,
+                maxRetry = 1
+            );
+            SetUpPaxosSystem(config);
+        }
+    }
+}
+
 
 machine BasicTest {
     start state Init {
@@ -133,7 +119,8 @@ machine BasicTest {
                 numProposers = 3,
                 numAcceptors = 3,
                 failAcceptors = 2, // failures must be < numAcceptors (assertion in FailureInjector)
-                reliableMessages = false
+                reliableMessages = false,
+                maxRetry = 3
             );
             SetUpPaxosSystem(config);
         }

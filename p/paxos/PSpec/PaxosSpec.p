@@ -4,7 +4,7 @@ Note, the usage of hot and cold states.
 ***************************************************************************/
 event eValueDecided: int;
 
-// Once consensus is reached, the value should not change (this is single-decree Paxos)
+// Once consensus is reached, the value should not change
 spec Integrity observes eValueDecided {
     var observedValue: int;
     start state Init {
@@ -32,7 +32,7 @@ spec FailIfConsensus observes eValueDecided {
 
 // This spec makes indecision a hot state
 spec AlwaysReachesConsensus observes eValueDecided {
-    start hot state Init {
+    start hot state WaitingForDecision {
         on eValueDecided goto ValueDecided;
     }
 

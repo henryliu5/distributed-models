@@ -29,17 +29,15 @@ machine Proposer
 
     start state Init {
         // Set up initial state, who the acceptors are, which proposer are we
-        entry (args : (acceptors: set[Acceptor], proposerId: int, numProposers: int, reliableMessages: bool)) {
+        entry (args : (acceptors: set[Acceptor], proposerId: int, numProposers: int, reliableMessages: bool, maxRetry: int)) {
             proposerId = args.proposerId;
             acceptors = args.acceptors;
             numProposers = args.numProposers;
             reliableMessages = args.reliableMessages;
+            maxRetry = args.maxRetry;
+
             round = 0;
             curBallotId = proposerId;
-
-            // Manually set the maximum retry limit
-            maxRetry = 5;
-
             goto PreparePhase;
         }
     }
@@ -49,11 +47,11 @@ machine Proposer
         entry {
             curBallotId = proposerId + round * numProposers;
             // Next time increase the ballot id
-            round = round + 1;
             if(round == maxRetry){
                 print format("Ran out of retries, halting");
                 raise halt;
             }
+            round = round + 1;
 
             if(reliableMessages){
                 ReliableBroadCast(acceptors, ePrepare, (proposer = this, ballotId = curBallotId));
@@ -73,7 +71,6 @@ machine Proposer
     // Collect promises from the Acceptors
     state WaitForPromises {
         entry {
-            // TODO Start timer?
             receivedPromises = 0;
             largestAcceptedBallotId = -1;
             // Just some random value we want to propose, for each round of ballots this is different
