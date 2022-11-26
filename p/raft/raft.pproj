@@ -1,5 +1,5 @@
 <Project>
-<ProjectName>TL2</ProjectName>
+<ProjectName>Raft</ProjectName>
 <InputFiles>
 	<PFile>./PSrc/</PFile>
 	<PFile>./PSpec/</PFile>
