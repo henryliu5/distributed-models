@@ -45,6 +45,8 @@ machine RaftMachine {
         while(commitIndex > lastApplied) {
             lastApplied = lastApplied + 1;
             log[lastApplied].executed = true;
+            print format("applying in {0} command {1} at index {2}", this, lastApplied, log[lastApplied]);
+            print format("log {0}", log);
             announce eApply, (index = lastApplied, command = log[lastApplied].command);
         }
     }
@@ -71,6 +73,7 @@ machine RaftMachine {
 
             // The original paper has the log 1-indexed, I shall do the same just in case
             log += (0, default(LogEntry));
+            log[0].executed = true;
             assert sizeof(log) == 1;
 
             receive {
@@ -148,6 +151,10 @@ machine RaftMachine {
             checkTerm(appendReq.term);
         }
 
+        on eShutDown do {
+            raise halt;
+        }
+
         on eTimeOut goto Candidate;
 
         // Ignore client requests (for leader), and voting responses from the past
@@ -181,15 +188,22 @@ machine RaftMachine {
     var matches: int;
     var otherMachine: RaftMachine;
     fun updateCommitIndex(){
-        tryIndex = commitIndex;
+        tryIndex = commitIndex + 1;
 
         while(tryIndex < sizeof(log)){
-            matches = 0;
+            print format("trying tryIndex {0}", tryIndex);
+            matches = 1; // We always have ourselves too
             foreach(otherMachine in otherMachines){
-                if(matchIndex[otherMachine] >= tryIndex) matches = matches + 1;
+                if(matchIndex[otherMachine] >= tryIndex){
+                    print format("match on matchIndex[{0}]", otherMachine);
+                    matches = matches + 1;
+                }
             }
             if(matches * 2 > sizeof(otherMachines) + 1 && log[tryIndex].term == currentTerm){
+                print format("leader {0} incrementing commit index to {1}, {2} matches, {3} total machines", this, tryIndex, matches, sizeof(otherMachines) + 1);
                 commitIndex = tryIndex;
+                checkApply();
+                // Not actually correct to always send an ack here, but for testing purposes it works
                 send client, eClientResp, true;
             }
 
@@ -230,7 +244,8 @@ machine RaftMachine {
             checkTerm(resp.term);
             if(resp.success){
                 nextIndex[resp.follower] = sizeof(log);
-                matchIndex[resp.follower] = sizeof(log);
+                matchIndex[resp.follower] = sizeof(log) - 1;
+                print format ("updated match index of {0} to {1}", resp.follower, sizeof(log));
                 updateCommitIndex();
             } else {
                 // Try again
@@ -242,6 +257,10 @@ machine RaftMachine {
 
         on eAppendReq do (req: tAppendReq) {
             checkTerm(req.term);
+        }
+
+        on eShutDown do {
+            raise halt;
         }
 
         // Ignore everything related to a previous election
@@ -272,6 +291,10 @@ machine RaftMachine {
                     goto Leader;
                 }
             }
+        }
+
+        on eShutDown do {
+            raise halt;
         }
 
         on eAppendReq goto Follower; // Someone else became leader, cede election

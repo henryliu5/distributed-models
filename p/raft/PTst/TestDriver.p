@@ -2,7 +2,7 @@ event eGetMachines: set[RaftMachine];
 event eClientReq: int;
 event eClientResp: bool;
 
-fun setupRaft(sender: machine, numMachines: int) : set[RaftMachine]
+fun setupRaft(sender: machine, numMachines: int, numFailures: int) : set[RaftMachine]
 {
     var machines: set[RaftMachine];
     var i: int;
@@ -12,6 +12,10 @@ fun setupRaft(sender: machine, numMachines: int) : set[RaftMachine]
         i = i + 1;
     }
     ReliableBroadCast(machines, eGetMachines, machines);
+
+    if(numFailures > 0){
+        CreateFailureInjector((nodes = machines, nFailures = numFailures));
+    }
     return machines;
 }
 
@@ -21,8 +25,9 @@ machine BasicTest {
     var machines: set[RaftMachine];
     start state Init{
         entry {
-            numMessages = 3;
-            machines = setupRaft(this, 3);
+            // Send up to 5 messages, 5 nodes in cluster, 2 failures
+            numMessages = 5;
+            machines = setupRaft(this, 5, 2);
             timer = CreateTimer(this);
             StartTimer(timer);
         }

@@ -25,6 +25,7 @@ spec LogMatching observes eLogUpdate {
     start state Init {
         on eLogUpdate do (msg: (server: RaftMachine, log: seq[LogEntry])) {
             logs[msg.server] = msg.log;
+            print format("got log update: {0} log is {1}", msg.server, msg.log);
         }
     }
 }
@@ -38,7 +39,7 @@ spec StateMachineSafety observes eApply {
     start state Init {
         on eApply do (msg: (index: int, command: int)) {
             if(msg.index in commands){
-                assert commands[msg.index] == msg.command;
+                assert commands[msg.index] == msg.command, format("Executed command {0} and {1} at index {2}", commands[msg.index], msg.command, msg.index);
             }
             commands[msg.index] = msg.command;
         }
