@@ -9,7 +9,7 @@ event eVoteResp: tVoteResp;
 // AppendEntries RPC - sent from leaders to everyone else
 type tAppendReq = (term: int, leader: RaftMachine, prevLogIndex: int, prevLogTerm: int, entries: seq[LogEntry], leaderCommit: int);
 event eAppendReq: tAppendReq;
-type tAppendResp = (follower: RaftMachine, term: int, success: bool);
+type tAppendResp = (follower: RaftMachine, term: int, success: bool, appendReq: tAppendReq); // last field for debugging
 event eAppendResp: tAppendResp;
 
 type LogEntry = (command: int, term: int, executed: bool);
@@ -45,7 +45,7 @@ machine RaftMachine {
         while(commitIndex > lastApplied) {
             lastApplied = lastApplied + 1;
             log[lastApplied].executed = true;
-            print format("applying in {0} command {1} at index {2}", this, lastApplied, log[lastApplied]);
+            print format("applying in {0} index {1} at command {2}", this, lastApplied, log[lastApplied]);
             print format("log {0}", log);
             announce eApply, (index = lastApplied, command = log[lastApplied].command);
         }
@@ -91,6 +91,7 @@ machine RaftMachine {
 
     var voteDecision: bool;
     var i: int;
+    var replace: bool;
     state Follower {
         entry {
             StartTimer(electionTimer);
@@ -123,21 +124,39 @@ machine RaftMachine {
                appendReq.prevLogIndex >= sizeof(log) ||
                log[appendReq.prevLogIndex].term != appendReq.prevLogTerm) {
                // Reject leader's append
-               UnReliableSend(appendReq.leader, eAppendResp, (follower = this, term = currentTerm, success = false));
+               print format("{0} rejected append, log {1}, append req {2}", this, log, appendReq);
+               UnReliableSend(appendReq.leader, eAppendResp, (follower = this, term = currentTerm, success = false, appendReq = appendReq));
             } else {
-
-                // Not good for performance but easy to make sure its right
-                // Clear out our log above prevLogIndex
-                i = appendReq.prevLogIndex + 1;
-                while(i < sizeof(log)){
-                    log -= (i);
-                }
-                // Add in stuff sent to us
+                // Use term numbers to see what needs to be replaced with new entries from leader
                 i = 0;
-                while(i < sizeof(appendReq.entries)){
-                    log += (sizeof(log), appendReq.entries[i]);
+                replace = false;
+                print format ("follower {0} before applying append to log {1}, i={2}", this, log, i);
+                while(appendReq.prevLogIndex + 1 + i < sizeof(log) && i < sizeof(appendReq.entries)){
+                    // Mismatch, replace this one and all that follow
+                    if(log[appendReq.prevLogIndex + 1 + i].term != appendReq.entries[i].term){
+                        replace = true;
+                    }
+                    if(replace){
+                        log[appendReq.prevLogIndex + 1 + i] = appendReq.entries[i];
+                    }
                     i = i + 1;
                 }
+                print format ("follower {0} done applying replace to log {1}, i={2}", this, log, i);
+                if(replace){
+                    while(appendReq.prevLogIndex + 1 + i < sizeof(log)){
+                        print format("log before {0}", log);
+                        log -= (appendReq.prevLogIndex + 1 + i);
+                        print format("log after {0}", log);
+                    }
+                }
+                    print format("i={0}, sizeof entries = {1}", i, sizeof(appendReq.entries));
+                    // If there's more, it's just an append
+                    while(i < sizeof(appendReq.entries)){
+                        log += (sizeof(log), appendReq.entries[i]);
+                        i = i + 1;
+                    }
+                    print format("log after append {0}", log);
+
                 announce eLogUpdate, (server = this, log = log);
 
                 // Update my commit index, apply state machine updates if possible
@@ -146,7 +165,7 @@ machine RaftMachine {
                     checkApply();
                 }
                 // Agree to leader's append
-                UnReliableSend(appendReq.leader, eAppendResp, (follower = this, term = currentTerm, success = true));
+                UnReliableSend(appendReq.leader, eAppendResp, (follower = this, term = currentTerm, success = true, appendReq = appendReq));
             }
             checkTerm(appendReq.term);
         }
@@ -222,11 +241,12 @@ machine RaftMachine {
                 matchIndex[otherMachine] = 0; // actually written to follower
             }
             // Dummy heartbeat so everyone knows about this new leader
+            // Need to actually be a little bit careful
             UnReliableBroadCast(otherMachines, eAppendReq,
                 (term = currentTerm,
                  leader = this,
-                 prevLogIndex = 0,
-                 prevLogTerm = 0,
+                 prevLogIndex = sizeof(log) - 1,
+                 prevLogTerm = log[sizeof(log) - 1].term,
                  entries = default(seq[LogEntry]),
                  leaderCommit = commitIndex));
         }
@@ -243,13 +263,21 @@ machine RaftMachine {
         on eAppendResp do (resp: tAppendResp) {
             checkTerm(resp.term);
             if(resp.success){
-                nextIndex[resp.follower] = sizeof(log);
-                matchIndex[resp.follower] = sizeof(log) - 1;
+                // TODO weird, see below
+//                nextIndex[resp.follower] = sizeof(log);
+//                matchIndex[resp.follower] = sizeof(log) - 1;
+                nextIndex[resp.follower] = resp.appendReq.prevLogIndex + 1 + sizeof(resp.appendReq.entries);
+                matchIndex[resp.follower] = nextIndex[resp.follower] - 1;
                 print format ("updated match index of {0} to {1}", resp.follower, sizeof(log));
                 updateCommitIndex();
             } else {
                 // Try again
                 nextIndex[resp.follower] = nextIndex[resp.follower] - 1;
+                // TODO weird possible problem from mixing up responses, i.e. Leader AERPC, AERPC, AERPC resposne
+                // TODO we have to be careful that the update of nextIndex and matchIndex don't use the values from later on (the 2nd) AERPC
+                if(nextIndex[resp.follower] < 1){
+                    nextIndex[resp.follower] = 1;
+                }
                 print format ("{0} needing to retry for {1}, decremening nextIndex to {2}", this, resp.follower, nextIndex[resp.follower]);
                 sendAppendEntryRPC(resp.follower);
             }

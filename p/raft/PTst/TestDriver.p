@@ -26,8 +26,8 @@ machine BasicTest {
     start state Init{
         entry {
             // Send up to 5 messages, 5 nodes in cluster, 2 failures
-            numMessages = 5;
-            machines = setupRaft(this, 5, 2);
+            numMessages = 2;
+            machines = setupRaft(this, 3, 0);
             timer = CreateTimer(this);
             StartTimer(timer);
         }
