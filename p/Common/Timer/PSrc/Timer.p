@@ -20,7 +20,7 @@ machine Timer
   state TimerStarted {
     defer eStartTimer;
     entry {
-      if($)
+      if(choose(1000) == 1)
       {
         send client, eTimeOut;
         goto WaitForTimerRequests;

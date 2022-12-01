@@ -2,7 +2,8 @@
 fun UnReliableSend(target: machine, message: event, payload: any) {
   // nondeterministically drop messages
   // $: choose()
-  if($) send target, message, payload;
+  if($)
+  send target, message, payload;
 }
 
 // unrelialbe broadcast function
